@@ -1,0 +1,101 @@
+name: Build IDA Bitfields Plugin
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            ida_lib_os: win_vc
+            ida_ext: dll
+            cmake_generator: '-G "Visual Studio 17 2022" -A x64'
+          - os: ubuntu-latest
+            ida_lib_os: linux_gcc
+            ida_ext: so
+            cmake_generator: ''
+          - os: macos-latest
+            ida_lib_os: mac_clang
+            ida_ext: dylib
+            cmake_generator: ''
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Clone IDA SDK
+      uses: actions/checkout@v3
+      with:
+        repository: HexRaysSA/ida-sdk
+        path: ida_sdk
+        ref: main
+    
+
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Setup MSVC Environment on Windows
+      if: matrix.os == 'windows-latest'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Set up IDA SDK folder structure
+      shell: bash
+      run: |
+        # Create necessary directories for the IDA SDK structure
+        mkdir -p "${{ github.workspace }}/ida_sdk/include"
+        mkdir -p "${{ github.workspace }}/ida_sdk/plugins/hexrays_sdk/include"
+        
+        # Export CI=1 to tell CMake we're in CI environment
+        echo "CI=1" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      shell: bash
+      run: |
+        mkdir -p build
+        cd build
+        
+        # Configure CMake with the IDA SDK path and CI environment
+        cmake ${{ matrix.cmake_generator }} -DCMAKE_BUILD_TYPE=Release \
+          -DIDA_SDK_DIR="${{ github.workspace }}/ida_sdk" \
+          -DCI=1 ..
+
+    - name: Build
+      shell: bash
+      run: |
+        cd build
+        cmake --build . --config Release
+
+    - name: Package Plugin
+      shell: bash
+      run: |
+        mkdir -p artifacts
+        
+        # Copy the built plugin to artifacts directory
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          cp build/Release/bitfields*.dll artifacts/ 2>/dev/null || cp build/bitfields*.dll artifacts/ 2>/dev/null || echo "No DLL found"
+        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          cp build/bitfields*.dylib artifacts/ 2>/dev/null || echo "No DYLIB found"
+        else
+          cp build/bitfields*.so artifacts/ 2>/dev/null || echo "No SO found"
+        fi
+        
+        # Check if we found any plugin files
+        ls -la artifacts/
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ida-bitfields-${{ matrix.os }}
+        path: artifacts/
