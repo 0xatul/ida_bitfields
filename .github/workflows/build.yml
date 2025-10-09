@@ -30,12 +30,12 @@ jobs:
             cmake_generator: ''
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
 
     - name: Clone IDA SDK
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: HexRaysSA/ida-sdk
         path: ida_sdk
@@ -95,7 +95,7 @@ jobs:
         ls -la artifacts/
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ida-bitfields-${{ matrix.os }}
         path: artifacts/
