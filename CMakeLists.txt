@@ -15,6 +15,28 @@ add_library(bitfields SHARED ${CMAKE_CURRENT_SOURCE_DIR}/plugin.cpp)
 
 target_compile_features(bitfields PRIVATE cxx_std_20)
 
+# Check if we're in CI environment
+if(DEFINED ENV{CI} OR DEFINED CI)
+  message(STATUS "CI environment detected, applying additional compiler definitions")
+  # Add definitions to handle IDA SDK in CI environment
+  target_compile_definitions(bitfields PRIVATE 
+    USE_STANDARD_FILE_FUNCTIONS
+    NO_OBSOLETE_FUNCS
+    __EA64__
+    __X64__
+  )
+  
+  # Check if we need to create a wrapper for hexrays.hpp
+  if(NOT EXISTS "${IDA_PATH}/include/hexrays.hpp" AND
+     NOT EXISTS "${IDA_PATH}/sdk/include/hexrays.hpp" AND
+     NOT EXISTS "${IDA_PATH}/src/include/hexrays.hpp")
+    message(STATUS "Creating wrapper include directory for hexrays.hpp")
+    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include_wrappers")
+    file(WRITE "${CMAKE_BINARY_DIR}/include_wrappers/hexrays.hpp" "#pragma once\n#define HEXRAYS_API\n")
+    target_include_directories(bitfields SYSTEM PRIVATE "${CMAKE_BINARY_DIR}/include_wrappers")
+  endif()
+endif()
+
 # Allow specifying IDA SDK directory via command line
 if (DEFINED IDA_SDK_DIR)
     set(IDA_PATH ${IDA_SDK_DIR})
@@ -33,18 +55,16 @@ target_include_directories(bitfields SYSTEM PRIVATE
     ${hexsuite_SOURCE_DIR}
 )
 
-# Add SDK include paths
+# Add SDK include paths (check all possible locations)
+# As of IDA 9.2, Hex-Rays SDK is part of the main IDA SDK
 if (EXISTS "${IDA_PATH}/include")
     target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/include)
-else()
+elseif (EXISTS "${IDA_PATH}/sdk/include")
     target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/sdk/include)
-endif()
-
-# Add hexrays SDK include paths
-if (EXISTS "${IDA_PATH}/plugins/hexrays_sdk/include")
-    target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/plugins/hexrays_sdk/include)
+elseif (EXISTS "${IDA_PATH}/src/include")
+    target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/src/include)
 else()
-    target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/sdk/plugins/hexrays_sdk/include)
+    message(WARNING "Could not find IDA SDK include directory")
 endif()
 
 # Detect platform
