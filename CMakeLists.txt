@@ -25,16 +25,6 @@ if(DEFINED ENV{CI} OR DEFINED CI)
     __EA64__
     __X64__
   )
-  
-  # Check if we need to create a wrapper for hexrays.hpp
-  if(NOT EXISTS "${IDA_PATH}/include/hexrays.hpp" AND
-     NOT EXISTS "${IDA_PATH}/sdk/include/hexrays.hpp" AND
-     NOT EXISTS "${IDA_PATH}/src/include/hexrays.hpp")
-    message(STATUS "Creating wrapper include directory for hexrays.hpp")
-    file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include_wrappers")
-    file(WRITE "${CMAKE_BINARY_DIR}/include_wrappers/hexrays.hpp" "#pragma once\n#define HEXRAYS_API\n")
-    target_include_directories(bitfields SYSTEM PRIVATE "${CMAKE_BINARY_DIR}/include_wrappers")
-  endif()
 endif()
 
 # Allow specifying IDA SDK directory via command line
@@ -55,17 +45,12 @@ target_include_directories(bitfields SYSTEM PRIVATE
     ${hexsuite_SOURCE_DIR}
 )
 
-# Add SDK include paths (check all possible locations)
-# As of IDA 9.2, Hex-Rays SDK is part of the main IDA SDK
-if (EXISTS "${IDA_PATH}/include")
-    target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/include)
-elseif (EXISTS "${IDA_PATH}/sdk/include")
-    target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/sdk/include)
-elseif (EXISTS "${IDA_PATH}/src/include")
-    target_include_directories(bitfields SYSTEM PRIVATE ${IDA_PATH}/src/include)
-else()
-    message(WARNING "Could not find IDA SDK include directory")
-endif()
+# Add SDK include paths for the IDA SDK repository
+target_include_directories(bitfields SYSTEM PRIVATE 
+    ${IDA_PATH}/include
+    ${IDA_PATH}/sdk/include
+    ${IDA_PATH}/src/include
+)
 
 # Detect platform
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")

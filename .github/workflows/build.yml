@@ -40,6 +40,25 @@ jobs:
         repository: HexRaysSA/ida-sdk
         path: ida_sdk
         ref: main
+
+    - name: Prepare IDA SDK for build
+      shell: bash
+      run: |
+        # Setup necessary directories for build
+        mkdir -p ida_sdk/include
+        
+        # Display the SDK structure for debugging
+        echo "IDA SDK repository structure:"
+        ls -la ida_sdk
+        
+        # If headers are in src/include, make sure they're accessible
+        if [ -d "ida_sdk/src/include" ]; then
+          echo "Found src/include directory with headers:"
+          ls -la ida_sdk/src/include
+          
+          # Create symlinks to all header files
+          cp ida_sdk/src/include/*.h* ida_sdk/include/ 2>/dev/null || echo "No header files to copy"
+        fi
     
 
 
@@ -50,12 +69,16 @@ jobs:
       if: matrix.os == 'windows-latest'
       uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Set up IDA SDK folder structure
+    - name: Set up CI Environment
       shell: bash
       run: |
-        # Create necessary directories for the IDA SDK structure
-        mkdir -p "${{ github.workspace }}/ida_sdk/include"
-        mkdir -p "${{ github.workspace }}/ida_sdk/plugins/hexrays_sdk/include"
+        # Print directory structure for debugging
+        echo "IDA SDK directory structure:"
+        find "${{ github.workspace }}/ida_sdk" -type d | sort
+        
+        # List include files
+        echo "IDA SDK header files:"
+        find "${{ github.workspace }}/ida_sdk" -name "*.hpp" -o -name "*.h" | sort
         
         # Export CI=1 to tell CMake we're in CI environment
         echo "CI=1" >> $GITHUB_ENV
@@ -69,6 +92,7 @@ jobs:
         # Configure CMake with the IDA SDK path and CI environment
         cmake ${{ matrix.cmake_generator }} -DCMAKE_BUILD_TYPE=Release \
           -DIDA_SDK_DIR="${{ github.workspace }}/ida_sdk" \
+          -DCMAKE_CXX_FLAGS="-I${{ github.workspace }}/ida_sdk/src/include -I${{ github.workspace }}/ida_sdk/include" \
           -DCI=1 ..
 
     - name: Build
