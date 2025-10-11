@@ -87,7 +87,7 @@ inline cexpr_t* create_bitfield_access( access_info& info, udm_t& member, ea_t o
 	func_type_data_t data;
 	data.flags = FTI_PURE;
 	data.rettype = member.size == 1 ? tinfo_t{ BTF_BOOL } : common_type;
-	data.cc = CM_CC_UNKNOWN;
+	data._old_cc = CM_CC_UNKNOWN;
 	data.push_back( funcarg_t{ "", info.underlying_expr->type } );
 	data.push_back( funcarg_t{ "", common_type } );
 
@@ -433,7 +433,7 @@ inline void handle_or_assignment( cexpr_t* expr )
 			func_type_data_t data;
 			data.flags = FTI_PURE;
 			data.rettype = tinfo_t{ BTF_VOID };
-			data.cc = CM_CC_UNKNOWN;
+			data._old_cc = CM_CC_UNKNOWN;
 			data.reserve( fields.size() + 1 );
 			for ( size_t i = 0; i < fields.size() + 1; ++i )
 				data.push_back( funcarg_t{ "", info.underlying_expr->type } );
