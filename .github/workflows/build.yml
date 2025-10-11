@@ -59,13 +59,32 @@ jobs:
           }
         }
         
+        # Remove existing symlinks if they exist
+        $symlinks = @(
+          "$structurePath\sdk\include",
+          "$structurePath\plugins\hexrays_sdk\include", 
+          "$structurePath\sdk\lib"
+        )
+        
+        foreach ($link in $symlinks) {
+          if (Test-Path $link) {
+            Write-Host "Removing existing symlink: $link" -ForegroundColor Yellow
+            Remove-Item $link -Force -Recurse
+          }
+        }
+        
         # Create directory symlinks using mklink
         $sourceInclude = (Resolve-Path "ida-sdk\src\include").Path
         $sourceLib = (Resolve-Path "ida-sdk\src\lib").Path
         
         cmd /c "mklink /J `"$structurePath\sdk\include`" `"$sourceInclude`""
+        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create include symlink"; exit 1 }
+        
         cmd /c "mklink /J `"$structurePath\plugins\hexrays_sdk\include`" `"$sourceInclude`""
+        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create hexrays_sdk include symlink"; exit 1 }
+        
         cmd /c "mklink /J `"$structurePath\sdk\lib`" `"$sourceLib`""
+        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create lib symlink"; exit 1 }
         
         # Verify the symlinks work
         Write-Host "Verifying symlinks..." -ForegroundColor Yellow
