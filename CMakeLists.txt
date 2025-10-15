@@ -99,3 +99,45 @@ if(UNIX)
         set_target_properties(bitfields PROPERTIES SUFFIX ".so")
     endif()
 endif()
+
+# Different platforms have different library names and extensions
+if(WIN32)
+    set(IDA_LIB_NAME "ida.lib")
+else()
+    if(APPLE)
+        set(IDA_LIB_NAME "libida64.dylib")
+    else() # Linux
+        set(IDA_LIB_NAME "libida64.so")
+    endif()
+endif()
+
+# In CI environment, we might need to skip actual linking against ida libraries
+if(DEFINED ENV{CI} OR DEFINED CI)
+    message(STATUS "CI environment detected, skipping IDA library linkage")
+else()
+    target_link_libraries(bitfields PRIVATE ${IDA_LIB_NAME})
+endif()
+
+# Add library directories - check both possible SDK structures
+if (EXISTS "${IDA_PATH}/lib")
+    target_link_directories(
+        bitfields PRIVATE 
+            ${IDA_PATH}/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}_pro
+            ${IDA_PATH}/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}
+    )
+else()
+    target_link_directories(
+        bitfields PRIVATE 
+            ${IDA_PATH}/sdk/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}_pro
+            ${IDA_PATH}/sdk/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}
+    )
+endif()
+
+# For Unix systems, set the appropriate file extensions
+if(UNIX)
+    if(APPLE)
+        set_target_properties(bitfields PROPERTIES SUFFIX ".dylib")
+    else()
+        set_target_properties(bitfields PROPERTIES SUFFIX ".so")
+    endif()
+endif()
