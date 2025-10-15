@@ -4,6 +4,7 @@ project(ida_bitfields)
 
 include(FetchContent)
 
+# Fetch HexSuite dependency
 FetchContent_Declare(
   HexSuite
   GIT_REPOSITORY https://github.com/can1357/hexsuite
@@ -11,105 +12,85 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(HexSuite)
 
+# Fetch IDA SDK
+FetchContent_Declare(
+  ida-sdk
+  GIT_REPOSITORY https://github.com/HexRaysSA/ida-sdk.git
+  GIT_TAG main
+)
+
+FetchContent_MakeAvailable(ida-sdk)
+
 add_library(bitfields SHARED ${CMAKE_CURRENT_SOURCE_DIR}/plugin.cpp)
 
 target_compile_features(bitfields PRIVATE cxx_std_20)
 
-# Check if we're in CI environment
-if(DEFINED ENV{CI} OR DEFINED CI)
-  message(STATUS "CI environment detected, applying additional compiler definitions")
-  # Add definitions to handle IDA SDK in CI environment
-  target_compile_definitions(bitfields PRIVATE 
-    USE_STANDARD_FILE_FUNCTIONS
-    NO_OBSOLETE_FUNCS
-    __EA64__
-    __X64__
-  )
+# Set up IDA SDK paths
+set(IDASDK ${ida-sdk_SOURCE_DIR}/src)
+
+
+# Verify IDA SDK is properly available
+if(NOT EXISTS ${IDASDK}/include/ida.hpp)
+    message(FATAL_ERROR "Missing header file in IDA SDK: ${IDASDK}/include/ida.hpp")
 endif()
 
-# Allow specifying IDA SDK directory via command line
-if (DEFINED IDA_SDK_DIR)
-    set(IDA_PATH ${IDA_SDK_DIR})
-elseif (DEFINED ENV{IDA_PATH})
-    set(IDA_PATH $ENV{IDA_PATH})
-elseif (DEFINED ENV{IDA_DIR})
-    set(IDA_PATH $ENV{IDA_DIR})
-else()
-    message(FATAL_ERROR "IDA_SDK_DIR, IDA_PATH or IDA_DIR environment variable must be set")
-endif()
-
-message(STATUS "Using IDA SDK at: ${IDA_PATH}")
-
-# Set include directories based on IDA SDK structure
-target_include_directories(bitfields SYSTEM PRIVATE 
-    ${hexsuite_SOURCE_DIR}
-)
-
-# Add SDK include paths for the IDA SDK repository
-target_include_directories(bitfields SYSTEM PRIVATE 
-    ${IDA_PATH}/include
-    ${IDA_PATH}/sdk/include
-    ${IDA_PATH}/src/include
-)
-
-# Detect platform
-if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    set(IDA_SDK_LIB_OS "win_vc")
-elseif (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    set(IDA_SDK_LIB_OS "mac_clang")
-elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    set(IDA_SDK_LIB_OS "linux_gcc")
-else()
-    message(FATAL_ERROR "unrecognized system: ${CMAKE_SYSTEM_NAME} (Windows/Darwin/Linux expected)")
-endif()
-
-# Detect architecture
-if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm") 
-    set(IDA_SDK_LIB_ARCH "arm64")
-else()
-    set(IDA_SDK_LIB_ARCH "x64")
-endif()
-
-# Set 32/64 bit mode
-if("${CMAKE_SIZEOF_VOID_P}" STREQUAL "8")
-    set(IDA_SDK_LIB_BITS "64")
-    set_target_properties(bitfields PROPERTIES OUTPUT_NAME "bitfields64")
-else()
-    set(IDA_SDK_LIB_BITS "32")
-endif()
-
-# Different platforms have different library names and extensions
-if(WIN32)
-    set(IDA_LIB_NAME "ida.lib")
-else()
-    if(APPLE)
-        set(IDA_LIB_NAME "libida64.dylib")
-    else() # Linux
-        set(IDA_LIB_NAME "libida64.so")
+# Set up platform-specific library paths and defines
+set(IMPORTED_PROPERTY "IMPORTED_LOCATION")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+        message(FATAL_ERROR "Unsupported architecture ${CMAKE_SYSTEM_PROCESSOR} for platform ${CMAKE_SYSTEM_NAME}")
     endif()
+    set(PLATFORM_DEFINE -D__LINUX__=1)
+    set(IDA_KERNEL_LIB "${IDASDK}/lib/x64_linux_gcc_64/libida.so")
+    set(IDA_LIB_LIB "${IDASDK}/lib/x64_linux_gcc_64/libidalib.so")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64")
+        message(FATAL_ERROR "Unsupported architecture ${CMAKE_SYSTEM_PROCESSOR} for platform ${CMAKE_SYSTEM_NAME}")
+    endif()
+    set(PLATFORM_DEFINE -D__NT__=1)
+    set(IDA_KERNEL_LIB "${IDASDK}/lib/x64_win_vc_64/ida.lib")
+    set(IDA_LIB_LIB "${IDASDK}/lib/x64_win_vc_64/idalib.lib")
+    set(IMPORTED_PROPERTY "IMPORTED_IMPLIB")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(PLATFORM_DEFINE -D__MAC__=1)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+        set(IDA_KERNEL_LIB "${IDASDK}/lib/arm64_mac_clang_64/libida.dylib")
+        set(IDA_LIB_LIB "${IDASDK}/lib/arm64_mac_clang_64/libidalib.dylib")
+    elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+        set(IDA_KERNEL_LIB "${IDASDK}/lib/x64_mac_clang_64/libida.dylib")
+        set(IDA_LIB_LIB "${IDASDK}/lib/x64_mac_clang_64/libidalib.dylib")
+    else()
+        message(FATAL_ERROR "Unsupported architecture ${CMAKE_SYSTEM_PROCESSOR} for platform ${CMAKE_SYSTEM_NAME}")
+    endif()
+else()
+    message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-# In CI environment, we might need to skip actual linking against ida libraries
-if(DEFINED ENV{CI} OR DEFINED CI)
-    message(STATUS "CI environment detected, skipping IDA library linkage")
-else()
-    target_link_libraries(bitfields PRIVATE ${IDA_LIB_NAME})
+# Create imported targets for IDA SDK
+add_library(idasdk::headers INTERFACE IMPORTED)
+target_include_directories(idasdk::headers INTERFACE ${IDASDK}/include)
+target_compile_definitions(idasdk::headers INTERFACE __EA64__=1 ${PLATFORM_DEFINE})
+
+add_library(idasdk::kernel SHARED IMPORTED)
+set_target_properties(idasdk::kernel PROPERTIES
+    ${IMPORTED_PROPERTY} ${IDA_KERNEL_LIB}
+    INTERFACE_LINK_LIBRARIES idasdk::headers
+)
+
+add_library(idasdk::lib SHARED IMPORTED)
+set_target_properties(idasdk::lib PROPERTIES
+    ${IMPORTED_PROPERTY} ${IDA_LIB_LIB}
+    INTERFACE_LINK_LIBRARIES idasdk::kernel
+)
+
+# Set output name for 64-bit builds
+if("${CMAKE_SIZEOF_VOID_P}" STREQUAL "8")
+    set_target_properties(bitfields PROPERTIES OUTPUT_NAME "bitfields64")
 endif()
 
-# Add library directories - check both possible SDK structures
-if (EXISTS "${IDA_PATH}/lib")
-    target_link_directories(
-        bitfields PRIVATE 
-            ${IDA_PATH}/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}_pro
-            ${IDA_PATH}/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}
-    )
-else()
-    target_link_directories(
-        bitfields PRIVATE 
-            ${IDA_PATH}/sdk/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}_pro
-            ${IDA_PATH}/sdk/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}
-    )
-endif()
+# Link our plugin against HexSuite and IDA SDK
+target_include_directories(bitfields SYSTEM PRIVATE ${hexsuite_SOURCE_DIR})
+target_link_libraries(bitfields PRIVATE idasdk::lib)
 
 # For Unix systems, set the appropriate file extensions
 if(UNIX)
