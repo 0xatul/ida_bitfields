@@ -3,123 +3,234 @@ name: Build IDA Bitfields Plugin
 on:
   push:
     branches: [ master ]
-  pull_request:
-    branches: [ master ]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-        include:
-          - os: windows-latest
-            ida_lib_os: win_vc
-            ida_ext: dll
-            cmake_generator: '-G "Visual Studio 17 2022" -A x64'
-          - os: ubuntu-latest
-            ida_lib_os: linux_gcc
-            ida_ext: so
-            cmake_generator: ''
-          - os: macos-latest
-            ida_lib_os: mac_clang
-            ida_ext: dylib
-            cmake_generator: ''
-
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-
-    - name: Clone IDA SDK
-      uses: actions/checkout@v4
-      with:
-        repository: HexRaysSA/ida-sdk
-        path: ida_sdk
-        ref: main
-
-    - name: Prepare IDA SDK for build
-      shell: bash
-      run: |
-        # Setup necessary directories for build
-        mkdir -p ida_sdk/include
-        
-        # Display the SDK structure for debugging
-        echo "IDA SDK repository structure:"
-        ls -la ida_sdk
-        
-        # If headers are in src/include, make sure they're accessible
-        if [ -d "ida_sdk/src/include" ]; then
-          echo "Found src/include directory with headers:"
-          ls -la ida_sdk/src/include
-          
-          # Create symlinks to all header files
-          cp ida_sdk/src/include/*.h* ida_sdk/include/ 2>/dev/null || echo "No header files to copy"
-        fi
+    runs-on: windows-latest
     
-
-
+    strategy:
+      matrix:
+        config: [Release] 
+        arch: [x64]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+    
     - name: Setup CMake
       uses: lukka/get-cmake@latest
-
-    - name: Setup MSVC Environment on Windows
-      if: matrix.os == 'windows-latest'
-      uses: ilammy/msvc-dev-cmd@v1
-
-    - name: Set up CI Environment
-      shell: bash
+    
+    - name: Clone IDA SDK
       run: |
-        # Print directory structure for debugging
-        echo "IDA SDK directory structure:"
-        find "${{ github.workspace }}/ida_sdk" -type d | sort
+        Write-Host "Downloading IDA SDK..." -ForegroundColor Yellow
+        git clone https://github.com/HexRaysSA/ida-sdk.git ida-sdk
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "Failed to clone IDA SDK"
+          exit 1
+        }
+      shell: pwsh
+    
+    - name: Create IDA SDK structure with symlinks
+      run: |
+        Write-Host "Creating IDA SDK structure with symlinks..." -ForegroundColor Yellow
         
-        # List include files
-        echo "IDA SDK header files:"
-        find "${{ github.workspace }}/ida_sdk" -name "*.hpp" -o -name "*.h" | sort
+        # Create base directories
+        $structurePath = "ida_sdk_structure"
+        $directories = @(
+          "$structurePath",
+          "$structurePath\sdk",
+          "$structurePath\sdk\include",
+          "$structurePath\sdk\lib", 
+          "$structurePath\plugins",
+          "$structurePath\plugins\hexrays_sdk",
+          "$structurePath\plugins\hexrays_sdk\include"
+        )
         
-        # Export CI=1 to tell CMake we're in CI environment
-        echo "CI=1" >> $GITHUB_ENV
-
+        foreach ($dir in $directories) {
+          if (!(Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Write-Host "Created directory: $dir" -ForegroundColor Green
+          }
+        }
+        
+        # Remove existing symlinks if they exist
+        $symlinks = @(
+          "$structurePath\sdk\include",
+          "$structurePath\plugins\hexrays_sdk\include", 
+          "$structurePath\sdk\lib"
+        )
+        
+        foreach ($link in $symlinks) {
+          if (Test-Path $link) {
+            Write-Host "Removing existing symlink: $link" -ForegroundColor Yellow
+            Remove-Item $link -Force -Recurse
+          }
+        }
+        
+        # Create directory symlinks using mklink
+        $sourceInclude = (Resolve-Path "ida-sdk\src\include").Path
+        $sourceLib = (Resolve-Path "ida-sdk\src\lib").Path
+        
+        cmd /c "mklink /J `"$structurePath\sdk\include`" `"$sourceInclude`""
+        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create include symlink"; exit 1 }
+        
+        cmd /c "mklink /J `"$structurePath\plugins\hexrays_sdk\include`" `"$sourceInclude`""
+        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create hexrays_sdk include symlink"; exit 1 }
+        
+        cmd /c "mklink /J `"$structurePath\sdk\lib`" `"$sourceLib`""
+        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create lib symlink"; exit 1 }
+        
+        # Verify the symlinks work
+        Write-Host "Verifying symlinks..." -ForegroundColor Yellow
+        $testFile = "$structurePath\sdk\include\hexrays.hpp"
+        if (Test-Path $testFile) {
+          Write-Host "✓ hexrays.hpp found at: $testFile" -ForegroundColor Green
+        } else {
+          Write-Error "✗ hexrays.hpp NOT found at: $testFile"
+          exit 1
+        }
+        
+        # Set environment variable for subsequent steps
+        $idaPath = (Resolve-Path $structurePath).Path
+        Write-Host "Setting IDA_PATH to: $idaPath" -ForegroundColor Green
+        echo "IDA_PATH=$idaPath" >> $env:GITHUB_ENV
+      shell: pwsh
+    
     - name: Configure CMake
-      shell: bash
       run: |
-        mkdir -p build
+        Write-Host "Configuring project with CMake..." -ForegroundColor Yellow
+        Write-Host "IDA_PATH: $env:IDA_PATH" -ForegroundColor Gray
+        
+        mkdir build
         cd build
         
-        # Configure CMake with the IDA SDK path and CI environment
-        cmake ${{ matrix.cmake_generator }} -DCMAKE_BUILD_TYPE=Release \
-          -DIDA_SDK_DIR="${{ github.workspace }}/ida_sdk" \
-          -DCMAKE_CXX_FLAGS="-I${{ github.workspace }}/ida_sdk/src/include -I${{ github.workspace }}/ida_sdk/include" \
-          -DCI=1 ..
-
-    - name: Build
-      shell: bash
+        cmake -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DIDA_PATH="$env:IDA_PATH" ..
+        
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "CMake configuration failed"
+          exit 1
+        }
+      shell: pwsh
+    
+    - name: Build project
       run: |
+        Write-Host "Building project..." -ForegroundColor Yellow
         cd build
-        cmake --build . --config Release
-
-    - name: Package Plugin
-      shell: bash
+        
+        cmake --build . --config ${{ matrix.config }}
+        
+        if ($LASTEXITCODE -ne 0) {
+          Write-Error "Build failed"
+          exit 1
+        }
+      shell: pwsh
+    
+    - name: List build outputs
       run: |
-        mkdir -p artifacts
+        Write-Host "Build completed successfully!" -ForegroundColor Green
+        Write-Host "Build outputs:" -ForegroundColor Cyan
         
-        # Copy the built plugin to artifacts directory
-        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-          cp build/Release/bitfields*.dll artifacts/ 2>/dev/null || cp build/bitfields*.dll artifacts/ 2>/dev/null || echo "No DLL found"
-        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-          cp build/bitfields*.dylib artifacts/ 2>/dev/null || echo "No DYLIB found"
-        else
-          cp build/bitfields*.so artifacts/ 2>/dev/null || echo "No SO found"
-        fi
-        
-        # Check if we found any plugin files
-        ls -la artifacts/
-
-    - name: Upload Artifacts
+        if (Test-Path "build\${{ matrix.config }}") {
+          Get-ChildItem "build\${{ matrix.config }}" | ForEach-Object {
+            Write-Host "  $($_.Name)" -ForegroundColor White
+          }
+        }
+      shell: pwsh
+    
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ida-bitfields-${{ matrix.os }}
-        path: artifacts/
+        name: bitfields-plugin-${{ matrix.config }}-${{ matrix.arch }}
+        path: |
+          build/${{ matrix.config }}/*.dll
+          build/${{ matrix.config }}/*.pdb
+        if-no-files-found: warn
+    
+    - name: Upload debug outputs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-build-outputs-${{ matrix.config }}-${{ matrix.arch }}
+        path: build/
+        if-no-files-found: warn
+
+  release:
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: bitfields-plugin-*
+        merge-multiple: false
+    
+    - name: Create release package
+      run: |
+        # Create release directory
+        mkdir -p release-package
+        
+        # Copy all built plugins to release package
+        find . -name "*.dll" -path "./bitfields-plugin-*" -exec cp {} release-package/ \;
+        find . -name "*.pdb" -path "./bitfields-plugin-*" -exec cp {} release-package/ \;
+        
+        # List what we're packaging
+        echo "Release package contents:"
+        ls -la release-package/
+        
+        # Create a zip file with all artifacts
+        cd release-package
+        zip -r ../ida-bitfields-plugin.zip .
+        cd ..
+        
+        echo "Created release package:"
+        ls -la ida-bitfields-plugin.zip
+    
+    - name: Generate release tag
+      id: tag
+      run: |
+        # Generate tag based on date and commit
+        TAG="v$(date +'%Y%m%d')-$(echo ${{ github.sha }} | cut -c1-7)"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "Generated tag: $TAG"
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: IDA Bitfields Plugin ${{ steps.tag.outputs.tag }}
+        body: |
+          ## IDA Bitfields Plugin Release
+          
+          **Built from commit:** ${{ github.sha }}
+          **Branch:** ${{ github.ref_name }}
+          **Build date:** $(date +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### Files included:
+          - `bitfields64.dll` - Release build (64-bit)
+          - `bitfields64.pdb` - Debug symbols for Release build
+          - Debug builds and symbols (if applicable)
+          
+          ### Installation:
+          1. Download the `ida-bitfields-plugin.zip` file
+          2. Extract the appropriate `.dll` file to your IDA Pro plugins directory
+          3. Restart IDA Pro
+          
+          ### Usage:
+          The plugin will automatically optimize bitfield access patterns in the Hex-Rays decompiler output.
+        files: |
+          ida-bitfields-plugin.zip
+          release-package/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true
