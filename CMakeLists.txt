@@ -4,6 +4,7 @@ project(ida_bitfields)
 
 include(FetchContent)
 
+# Fetch HexSuite dependency
 FetchContent_Declare(
   HexSuite
   GIT_REPOSITORY https://github.com/can1357/hexsuite
@@ -11,22 +12,22 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(HexSuite)
 
+# Fetch IDA SDK
+FetchContent_Declare(
+  ida-sdk
+  GIT_REPOSITORY https://github.com/HexRaysSA/ida-sdk.git
+  GIT_TAG main
+)
+
+FetchContent_MakeAvailable(ida-sdk)
+
 add_library(bitfields SHARED ${CMAKE_CURRENT_SOURCE_DIR}/plugin.cpp)
 
 target_compile_features(bitfields PRIVATE cxx_std_20)
 
-# Allow specifying IDA SDK directory via command line
-if (DEFINED IDA_SDK_DIR)
-    set(IDASDK ${IDA_SDK_DIR}/src)
-elseif (DEFINED ENV{IDA_PATH})
-    set(IDASDK $ENV{IDA_PATH}/src)
-elseif (DEFINED ENV{IDA_DIR})
-    set(IDASDK $ENV{IDA_DIR}/src)
-else()
-    message(FATAL_ERROR "IDA_SDK_DIR, IDA_PATH or IDA_DIR environment variable must be set")
-endif()
+# Set up IDA SDK paths
+set(IDASDK ${ida-sdk_SOURCE_DIR}/src)
 
-message(STATUS "Using IDA SDK at: ${IDASDK}")
 
 # Verify IDA SDK is properly available
 if(NOT EXISTS ${IDASDK}/include/ida.hpp)
@@ -90,48 +91,6 @@ endif()
 # Link our plugin against HexSuite and IDA SDK
 target_include_directories(bitfields SYSTEM PRIVATE ${hexsuite_SOURCE_DIR})
 target_link_libraries(bitfields PRIVATE idasdk::lib)
-
-# For Unix systems, set the appropriate file extensions
-if(UNIX)
-    if(APPLE)
-        set_target_properties(bitfields PROPERTIES SUFFIX ".dylib")
-    else()
-        set_target_properties(bitfields PROPERTIES SUFFIX ".so")
-    endif()
-endif()
-
-# Different platforms have different library names and extensions
-if(WIN32)
-    set(IDA_LIB_NAME "ida.lib")
-else()
-    if(APPLE)
-        set(IDA_LIB_NAME "libida64.dylib")
-    else() # Linux
-        set(IDA_LIB_NAME "libida64.so")
-    endif()
-endif()
-
-# In CI environment, we might need to skip actual linking against ida libraries
-if(DEFINED ENV{CI} OR DEFINED CI)
-    message(STATUS "CI environment detected, skipping IDA library linkage")
-else()
-    target_link_libraries(bitfields PRIVATE ${IDA_LIB_NAME})
-endif()
-
-# Add library directories - check both possible SDK structures
-if (EXISTS "${IDA_PATH}/lib")
-    target_link_directories(
-        bitfields PRIVATE 
-            ${IDA_PATH}/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}_pro
-            ${IDA_PATH}/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}
-    )
-else()
-    target_link_directories(
-        bitfields PRIVATE 
-            ${IDA_PATH}/sdk/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}_pro
-            ${IDA_PATH}/sdk/lib/${IDA_SDK_LIB_ARCH}_${IDA_SDK_LIB_OS}_${IDA_SDK_LIB_BITS}
-    )
-endif()
 
 # For Unix systems, set the appropriate file extensions
 if(UNIX)

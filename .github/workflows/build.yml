@@ -21,91 +21,14 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
     
-    - name: Clone IDA SDK
-      run: |
-        Write-Host "Downloading IDA SDK..." -ForegroundColor Yellow
-        git clone https://github.com/HexRaysSA/ida-sdk.git ida-sdk
-        if ($LASTEXITCODE -ne 0) {
-          Write-Error "Failed to clone IDA SDK"
-          exit 1
-        }
-      shell: pwsh
-    
-    - name: Create IDA SDK structure with symlinks
-      run: |
-        Write-Host "Creating IDA SDK structure with symlinks..." -ForegroundColor Yellow
-        
-        # Create base directories
-        $structurePath = "ida_sdk_structure"
-        $directories = @(
-          "$structurePath",
-          "$structurePath\sdk",
-          "$structurePath\sdk\include",
-          "$structurePath\sdk\lib", 
-          "$structurePath\plugins",
-          "$structurePath\plugins\hexrays_sdk",
-          "$structurePath\plugins\hexrays_sdk\include"
-        )
-        
-        foreach ($dir in $directories) {
-          if (!(Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            Write-Host "Created directory: $dir" -ForegroundColor Green
-          }
-        }
-        
-        # Remove existing symlinks if they exist
-        $symlinks = @(
-          "$structurePath\sdk\include",
-          "$structurePath\plugins\hexrays_sdk\include", 
-          "$structurePath\sdk\lib"
-        )
-        
-        foreach ($link in $symlinks) {
-          if (Test-Path $link) {
-            Write-Host "Removing existing symlink: $link" -ForegroundColor Yellow
-            Remove-Item $link -Force -Recurse
-          }
-        }
-        
-        # Create directory symlinks using mklink
-        $sourceInclude = (Resolve-Path "ida-sdk\src\include").Path
-        $sourceLib = (Resolve-Path "ida-sdk\src\lib").Path
-        
-        cmd /c "mklink /J `"$structurePath\sdk\include`" `"$sourceInclude`""
-        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create include symlink"; exit 1 }
-        
-        cmd /c "mklink /J `"$structurePath\plugins\hexrays_sdk\include`" `"$sourceInclude`""
-        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create hexrays_sdk include symlink"; exit 1 }
-        
-        cmd /c "mklink /J `"$structurePath\sdk\lib`" `"$sourceLib`""
-        if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create lib symlink"; exit 1 }
-        
-        # Verify the symlinks work
-        Write-Host "Verifying symlinks..." -ForegroundColor Yellow
-        $testFile = "$structurePath\sdk\include\hexrays.hpp"
-        if (Test-Path $testFile) {
-          Write-Host "✓ hexrays.hpp found at: $testFile" -ForegroundColor Green
-        } else {
-          Write-Error "✗ hexrays.hpp NOT found at: $testFile"
-          exit 1
-        }
-        
-        # Set environment variable for subsequent steps
-        $idaPath = (Resolve-Path $structurePath).Path
-        Write-Host "Setting IDA_PATH to: $idaPath" -ForegroundColor Green
-        echo "IDA_PATH=$idaPath" >> $env:GITHUB_ENV
-      shell: pwsh
-    
     - name: Configure CMake
       run: |
         Write-Host "Configuring project with CMake..." -ForegroundColor Yellow
-        Write-Host "IDA_PATH: $env:IDA_PATH" -ForegroundColor Gray
         
         mkdir build
         cd build
         
-        cmake -G "Visual Studio 17 2022" -A ${{ matrix.arch }} -DIDA_SDK_DIR="${{ github.workspace }}\ida-sdk" ..
+        cmake -G "Visual Studio 17 2022" -A ${{ matrix.arch }} ..
         
         if ($LASTEXITCODE -ne 0) {
           Write-Error "CMake configuration failed"
