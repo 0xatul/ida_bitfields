@@ -2,9 +2,7 @@ name: Build IDA Bitfields Plugin
 
 on:
   push:
-    branches: [ master, main, ci/add_build_workflow ]
-  pull_request:
-    branches: [ master, main ]
+    branches: [ master ]
   workflow_dispatch:
 
 jobs:
@@ -13,7 +11,7 @@ jobs:
     
     strategy:
       matrix:
-        config: [Release, Debug]
+        config: [Release] 
         arch: [x64]
     
     steps:
@@ -159,3 +157,80 @@ jobs:
         name: debug-build-outputs-${{ matrix.config }}-${{ matrix.arch }}
         path: build/
         if-no-files-found: warn
+
+  release:
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: bitfields-plugin-*
+        merge-multiple: false
+    
+    - name: Create release package
+      run: |
+        # Create release directory
+        mkdir -p release-package
+        
+        # Copy all built plugins to release package
+        find . -name "*.dll" -path "./bitfields-plugin-*" -exec cp {} release-package/ \;
+        find . -name "*.pdb" -path "./bitfields-plugin-*" -exec cp {} release-package/ \;
+        
+        # List what we're packaging
+        echo "Release package contents:"
+        ls -la release-package/
+        
+        # Create a zip file with all artifacts
+        cd release-package
+        zip -r ../ida-bitfields-plugin.zip .
+        cd ..
+        
+        echo "Created release package:"
+        ls -la ida-bitfields-plugin.zip
+    
+    - name: Generate release tag
+      id: tag
+      run: |
+        # Generate tag based on date and commit
+        TAG="v$(date +'%Y%m%d')-$(echo ${{ github.sha }} | cut -c1-7)"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "Generated tag: $TAG"
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: IDA Bitfields Plugin ${{ steps.tag.outputs.tag }}
+        body: |
+          ## IDA Bitfields Plugin Release
+          
+          **Built from commit:** ${{ github.sha }}
+          **Branch:** ${{ github.ref_name }}
+          **Build date:** $(date +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### Files included:
+          - `bitfields64.dll` - Release build (64-bit)
+          - `bitfields64.pdb` - Debug symbols for Release build
+          - Debug builds and symbols (if applicable)
+          
+          ### Installation:
+          1. Download the `ida-bitfields-plugin.zip` file
+          2. Extract the appropriate `.dll` file to your IDA Pro plugins directory
+          3. Restart IDA Pro
+          
+          ### Usage:
+          The plugin will automatically optimize bitfield access patterns in the Hex-Rays decompiler output.
+        files: |
+          ida-bitfields-plugin.zip
+          release-package/*
+        draft: false
+        prerelease: false
+        generate_release_notes: true
