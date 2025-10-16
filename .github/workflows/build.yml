@@ -124,33 +124,24 @@ jobs:
         echo "tag=$TAG" >> $GITHUB_OUTPUT
         echo "Generated tag: $TAG"
     
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%B %d, %Y')" >> $GITHUB_OUTPUT
+    
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.tag.outputs.tag }}
         name: IDA Bitfields Plugin ${{ steps.tag.outputs.tag }}
         body: |
-          ## IDA Bitfields Plugin Release
+          IDA Pro plugin for optimizing bitfield access patterns in Hex-Rays decompiler output.
           
-          **Built from commit:** ${{ github.sha }}
-          **Branch:** ${{ github.ref_name }}
-          **Build date:** $(date +'%Y-%m-%d %H:%M:%S UTC')
+          **Released:** ${{ steps.date.outputs.date }}
           
-          ### Files included:
-          - `bitfields64.dll` - Release build (64-bit)
-          - `bitfields64.pdb` - Debug symbols for Release build
-          - Debug builds and symbols (if applicable)
-          
-          ### Installation:
-          1. Download the `ida-bitfields-plugin.zip` file
-          2. Extract the appropriate `.dll` file to your IDA Pro plugins directory
-          3. Restart IDA Pro
-          
-          ### Usage:
-          The plugin will automatically optimize bitfield access patterns in the Hex-Rays decompiler output.
+          Download `ida-bitfields-plugin.zip` and extract the `.dll` file to your IDA Pro plugins directory.
         files: |
           ida-bitfields-plugin.zip
           release-package/*
         draft: false
         prerelease: false
-        generate_release_notes: true
+        generate_release_notes: false
